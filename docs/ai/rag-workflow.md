@@ -21,7 +21,9 @@ I'm building a modern RAG in Python which processes both structured data (e.g. C
 ### What do I mean by dynamic tool binding?
 
 If we have `customers.csv` and `compliances.md`, set tools=[`SQL_Query`,`Vector_Search`]
+
 If we have only `compliances.md`, set tools=[`Vector_Search`]
+
 Instead of static binding like in LangChain, we need dynamic tool binding based on actual data
 
 ---
