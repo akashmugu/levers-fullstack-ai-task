@@ -8,23 +8,34 @@ export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
 
   const send = useCallback(
     async (query: string, model: string, stream: boolean) => {
-      const userMessage: ChatMessage = { role: "user", content: query };
+      const userMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: query,
+      };
       setMessages((prev) => [...prev, userMessage]);
       setIsLoading(true);
 
-      const history = messages.map(({ role, content }) => ({ role, content }));
+      const history = messagesRef.current.map(({ role, content }) => ({
+        role,
+        content,
+      }));
+
+      const placeholderId = crypto.randomUUID();
+      const placeholder: ChatMessage = {
+        id: placeholderId,
+        role: "assistant",
+        content: "",
+        sources: [],
+      };
+      setMessages((prev) => [...prev, placeholder]);
 
       if (stream) {
-        const placeholder: ChatMessage = {
-          role: "assistant",
-          content: "",
-          sources: [],
-        };
-        setMessages((prev) => [...prev, placeholder]);
-
         abortRef.current = streamChat(
           { query, model, stream: true, history },
           (token) => {
@@ -63,25 +74,29 @@ export function useChat() {
       } else {
         try {
           const data = await sendChat({ query, model, stream: false, history });
-          const assistantMessage: ChatMessage = {
-            role: "assistant",
-            content: data.response,
-            sources: data.sources,
-          };
-          setMessages((prev) => [...prev, assistantMessage]);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === placeholderId
+                ? { ...m, content: data.response, sources: data.sources }
+                : m,
+            ),
+          );
         } catch (err) {
           const errorMessage =
             err instanceof Error ? err.message : "Something went wrong";
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: `Error: ${errorMessage}` },
-          ]);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === placeholderId
+                ? { ...m, content: `Error: ${errorMessage}` }
+                : m,
+            ),
+          );
         } finally {
           setIsLoading(false);
         }
       }
     },
-    [messages],
+    [],
   );
 
   const stop = useCallback(() => {

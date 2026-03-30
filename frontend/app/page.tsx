@@ -90,8 +90,8 @@ export default function Home() {
           />
         ) : (
           <div className="mx-auto max-w-3xl space-y-4 px-4 py-6">
-            {messages.map((message, index) => (
-              <ChatMessage key={index} message={message} />
+            {messages.map((message) => (
+              <ChatMessage key={message.id} message={message} />
             ))}
             <div ref={messagesEndRef} />
           </div>
