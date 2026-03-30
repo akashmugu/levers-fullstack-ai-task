@@ -1,6 +1,7 @@
 import json
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 from sse_starlette.sse import EventSourceResponse
 
 from app.models.schemas import ChatRequest, ChatResponse
@@ -9,7 +10,7 @@ router = APIRouter()
 
 
 @router.post("/api/chat")
-async def chat(chat_request: ChatRequest, request: Request):
+async def chat(chat_request: ChatRequest, request: Request) -> Response:
     engine = request.app.state.rag_engine
     history = [
         {"role": m.role, "content": m.content} for m in chat_request.history
@@ -17,7 +18,7 @@ async def chat(chat_request: ChatRequest, request: Request):
 
     if chat_request.stream:
 
-        async def event_generator():
+        async def event_generator():  # type: ignore[no-untyped-def]
             try:
                 async for token in engine.chat_stream(
                     chat_request.query, chat_request.model, history

@@ -1,4 +1,7 @@
+from typing import Any
+
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletion
 
 from app.core.config import settings
 
@@ -12,24 +15,28 @@ class LLMClient:
 
     async def chat(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         model: str,
-        tools: list[dict] | None = None,
-    ):
-        """Non-streaming chat completion. Returns a ChatCompletion object."""
-        kwargs: dict = {"model": model, "messages": messages}
+        tools: list[dict[str, Any]] | None = None,
+    ) -> ChatCompletion:
+        """Non-streaming chat completion."""
+        kwargs: dict[str, Any] = {"model": model, "messages": messages}
         if tools:
             kwargs["tools"] = tools
         return await self.client.chat.completions.create(**kwargs)
 
     async def chat_stream(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         model: str,
-        tools: list[dict] | None = None,
-    ):
+        tools: list[dict[str, Any]] | None = None,
+    ) -> Any:
         """Streaming chat completion. Returns an AsyncStream."""
-        kwargs: dict = {"model": model, "messages": messages, "stream": True}
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+        }
         if tools:
             kwargs["tools"] = tools
         return await self.client.chat.completions.create(**kwargs)

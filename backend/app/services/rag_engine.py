@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from app.core.prompt_store import prompt_store
 from app.services.llm_client import LLMClient
@@ -22,9 +23,9 @@ class RAGEngine:
 
     # -- Dynamic tool binding --------------------------------------------------
 
-    def _get_tools(self) -> list[dict]:
+    def _get_tools(self) -> list[dict[str, Any]]:
         """Build tool definitions based on currently available data."""
-        tools: list[dict] = []
+        tools: list[dict[str, Any]] = []
 
         if self.vector_store.has_documents():
             tools.append({
@@ -83,7 +84,7 @@ class RAGEngine:
     # -- Tool execution --------------------------------------------------------
 
     async def _execute_tool(
-        self, name: str, arguments: dict
+        self, name: str, arguments: dict[str, Any]
     ) -> tuple[str, set[str]]:
         """Execute a tool and return (result_text, source_names)."""
         if name == "vector_search":
@@ -115,8 +116,8 @@ class RAGEngine:
     # -- Message building ------------------------------------------------------
 
     def _build_messages(
-        self, query: str, history: list[dict]
-    ) -> list[dict]:
+        self, query: str, history: list[dict[str, str]]
+    ) -> list[dict[str, Any]]:
         system_content = prompt_store.get_prompt()
         tools = self._get_tools()
 
@@ -128,7 +129,9 @@ class RAGEngine:
                 "questions about compliance, accounts, or scripts."
             )
 
-        messages = [{"role": "system", "content": system_content}]
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system_content}
+        ]
         for msg in history:
             messages.append({"role": msg["role"], "content": msg["content"]})
         messages.append({"role": "user", "content": query})
@@ -140,8 +143,8 @@ class RAGEngine:
         self,
         query: str,
         model: str,
-        history: list[dict] | None = None,
-    ) -> dict:
+        history: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
         """Run the full tool-calling loop and return the final response."""
         messages = self._build_messages(query, history or [])
         tools = self._get_tools()
@@ -200,7 +203,7 @@ class RAGEngine:
         self,
         query: str,
         model: str,
-        history: list[dict] | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream the final answer. Tool-calling rounds are handled inline."""
         messages = self._build_messages(query, history or [])

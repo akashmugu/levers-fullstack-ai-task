@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter
 
 from app.core.config import settings
@@ -8,18 +10,18 @@ router = APIRouter()
 
 
 @router.get("/api/config/system-prompt", response_model=SystemPromptResponse)
-async def get_system_prompt():
+async def get_system_prompt() -> SystemPromptResponse:
     return SystemPromptResponse(prompt=prompt_store.get_prompt())
 
 
 @router.put("/api/config/system-prompt", response_model=SystemPromptResponse)
-async def update_system_prompt(update: SystemPromptUpdate):
+async def update_system_prompt(update: SystemPromptUpdate) -> SystemPromptResponse:
     prompt_store.set_prompt(update.prompt)
     return SystemPromptResponse(prompt=prompt_store.get_prompt())
 
 
 @router.get("/api/config/models")
-async def get_models():
+async def get_models() -> dict[str, Any]:
     return {
         "models": [
             {
