@@ -88,8 +88,8 @@ export function streamChat(
               onDone();
               return;
             }
-          } catch {
-            // skip malformed SSE lines
+          } catch (parseError) {
+            console.warn("Malformed SSE line:", trimmed, parseError);
           }
         }
       }

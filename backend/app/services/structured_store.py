@@ -5,36 +5,43 @@ import duckdb
 from app.core.config import settings
 
 
+def _quote_identifier(name: str) -> str:
+    """Escape a SQL identifier to prevent injection in double-quoted contexts."""
+    return '"' + name.replace('"', '""') + '"'
+
+
 class StructuredStore:
     def __init__(self) -> None:
         db_path = Path(settings.data_dir) / "structured.duckdb"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = duckdb.connect(str(db_path))
         self.tables: dict[str, dict] = {}
+        self._load_existing_tables()
+
+    def _load_existing_tables(self) -> None:
+        rows = self.conn.execute("SHOW TABLES").fetchall()
+        for (table_name,) in rows:
+            self._cache_table_metadata(table_name)
 
     def _cache_table_metadata(self, table_name: str) -> None:
-        schema = self.conn.execute(f'DESCRIBE "{table_name}"').fetchall()
-        sample = self.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 3').fetchall()
-        sample_columns = [desc[0] for desc in self.conn.description]
-        row_count = self.conn.execute(
-            f'SELECT COUNT(*) FROM "{table_name}"'
-        ).fetchone()[0]
+        quoted = _quote_identifier(table_name)
+        schema = self.conn.execute(f"DESCRIBE {quoted}").fetchall()
+        row_count = self.conn.execute(f"SELECT COUNT(*) FROM {quoted}").fetchone()[0]
         self.tables[table_name] = {
             "schema": schema,
-            "sample_rows": sample,
-            "sample_columns": sample_columns,
             "row_count": row_count,
         }
 
     def ingest_csv(self, file_path: str, table_name: str) -> None:
+        quoted = _quote_identifier(table_name)
         self.conn.execute(
-            f'CREATE OR REPLACE TABLE "{table_name}" '
-            f"AS SELECT * FROM read_csv_auto('{file_path}')"
+            f"CREATE OR REPLACE TABLE {quoted} AS SELECT * FROM read_csv_auto(?)",
+            [file_path],
         )
         self._cache_table_metadata(table_name)
 
     def drop_table(self, table_name: str) -> None:
-        self.conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+        self.conn.execute(f"DROP TABLE IF EXISTS {_quote_identifier(table_name)}")
         self.tables.pop(table_name, None)
 
     def execute_query(self, query: str) -> str:
@@ -63,11 +70,6 @@ class StructuredStore:
             parts.append(
                 f'Table "{table_name}" ({info["row_count"]} rows): columns [{cols}]'
             )
-            if info["sample_rows"]:
-                sample_header = " | ".join(info["sample_columns"])
-                parts.append(f"  Sample: {sample_header}")
-                for row in info["sample_rows"]:
-                    parts.append(f"          {' | '.join(str(v) for v in row)}")
         return "\n".join(parts)
 
     def table_exists(self, table_name: str) -> bool:

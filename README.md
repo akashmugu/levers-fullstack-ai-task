@@ -1,534 +1,241 @@
-# Full-Stack AI Chat Application — Take-Home Assignment
+# Debt Collection Compliance Assistant
 
-## Overview
+An AI-powered chat application that helps debt collection agents quickly look up compliance rules, call scripts, account data, and terminology. Uses a Retrieval-Augmented Generation (RAG) pipeline to ground LLM answers in uploaded reference documents.
 
-Build a **production-ready AI-powered chat application** for a **debt collection agent assistant**. The app uses a Retrieval-Augmented Generation (RAG) pipeline to help agents quickly look up compliance rules, call scripts, account data, and terminology — grounded in real reference documents.
-
-Users should be able to upload documents, ask questions against them, choose between different LLM models, and toggle between streaming and non-streaming response modes — all through a clean, responsive UI.
-
-This assignment evaluates your ability to design and implement a full-stack system that integrates modern AI/LLM tooling with solid software engineering practices.
-
----
-
-## Domain Context — Debt Collection Agent Assistant
-
-The chat assistant is designed for **debt collection agents** who need quick, accurate answers while on calls or reviewing accounts. Think of it as an internal compliance copilot.
-
-### What the agent should be able to ask
-
-- "What is the Mini-Miranda disclosure and when do I need to say it?"
-- "Can I call a consumer at 7:30 AM?"
-- "What do I do if a consumer says they filed for bankruptcy?"
-- "What's the status on account ACC-003?"
-- "What script should I use when a consumer disputes a debt?"
-- "What does SCRA_HOLD mean?"
-
-### System Prompt (store in memory)
-
-The system prompt for the LLM should be stored **in memory** on the backend (not hardcoded per request from the frontend). The candidate should design a simple mechanism where:
-
-- A default system prompt is loaded at server startup.
-- The prompt instructs the LLM to behave as a **debt collection compliance assistant** — helpful, accurate, and always grounding answers in the retrieved context.
-- The prompt should tell the model to cite which document the answer came from when possible.
-- **Bonus**: Allow the system prompt to be updated at runtime via an API endpoint (e.g., `PUT /api/config/system-prompt`), without restarting the server.
-
-Example system prompt (candidates may refine this):
-
-```
-You are a compliance assistant for debt collection agents. Answer questions
-using ONLY the provided context from company documents. If the context does
-not contain the answer, say so — do not make up information.
-
-When answering, cite which document the information came from.
-Be concise, professional, and accurate. If a question involves a specific
-account, provide the relevant details from the account data.
-```
-
----
-
-## Reference Data for RAG
-
-The following files are provided in the `rag-reference-data/` folder of this repository. These are the **seed documents** that must be ingested into the vector database to demonstrate the RAG pipeline.
-
-| File | Description | Purpose |
-|------|-------------|---------|
-| `fdcpa_quick_reference.md` | FDCPA rules summary — communication rules, consumer rights, prohibited conduct, penalties | Compliance Q&A |
-| `call_scripts.md` | Standard call scripts — opening, disputes, cease-and-desist, negotiation, voicemail | Script lookup |
-| `sample_accounts.csv` | 8 sample debtor accounts with varied statuses (active, disputed, bankruptcy, SCRA, etc.) | Account lookup |
-| `glossary.md` | Account statuses, regulatory terms, and disposition codes | Terminology lookup |
-
-> **These files are intentionally minimal.** The goal is to prove that the RAG pipeline works end-to-end — ingestion, retrieval, and grounded generation — not to build an exhaustive knowledge base.
-
-### Expected RAG Behavior
-
-After ingesting these documents, the system should be able to answer queries like:
-
-| Query | Expected Source | Expected Behavior |
-|-------|----------------|-------------------|
-| "What are the permitted calling hours?" | `fdcpa_quick_reference.md` | Returns 8 AM – 9 PM rule with context |
-| "What script do I use for voicemail?" | `call_scripts.md` | Returns the limited-content message script |
-| "What is the status of account ACC-007?" | `sample_accounts.csv` | Returns bankruptcy status with note |
-| "What does CEASE_DESIST mean?" | `glossary.md` | Returns the status definition |
-| "Can I contact David Kim directly?" | `sample_accounts.csv` | Returns cease-and-desist status — should advise no |
-| "What happens if I don't give the Mini-Miranda?" | `fdcpa_quick_reference.md` | Returns federal violation + penalty info |
-| "Tell me about HIPAA rules" | None | Should state the answer is not in the provided documents |
-
----
-
-## High-Level Architecture
+## Architecture
 
 ```mermaid
 graph TB
-    subgraph Client["🖥️ Frontend — Next.js"]
+    subgraph Frontend["Next.js 16 / React 19"]
         UI[Chat Interface]
         MS[Model Selector]
         ST[Stream Toggle]
-        DU[Document Upload]
+        DP[Document Panel]
+        SPE[System Prompt Editor]
     end
 
-    subgraph Server["⚙️ Backend — FastAPI"]
-        API[REST API Layer]
+    subgraph Backend["FastAPI"]
+        API[REST API + SSE]
         SP[System Prompt — In Memory]
-        RAG[RAG Engine]
-        LLM[LLM Integration Layer]
-        AUTH[Auth Middleware]
-        OBS[Observability Layer]
+        RAG[RAG Engine — Agentic Tool Loop]
+        LLM[LLM Client — OpenRouter]
     end
 
-    subgraph Storage["🗄️ Data Layer"]
-        VDB[(Vector Database)]
+    subgraph Storage["Data Layer"]
+        VDB[(ChromaDB — Vector Store)]
+        DDB[(DuckDB — Structured Store)]
         FS[(File Storage)]
-    end
-
-    subgraph External["☁️ External Services"]
-        LLM_API[LLM Provider API]
-        TEL[Telemetry Backend]
     end
 
     UI -->|HTTP / SSE| API
     MS -->|Model Config| API
     ST -->|Stream Flag| API
-    DU -->|Multipart Upload| API
+    DP -->|Multipart Upload| API
 
-    API --> AUTH
-    AUTH --> RAG
-    RAG -->|Embed & Store| VDB
-    RAG -->|Retrieve Context| VDB
+    API --> RAG
+    RAG -->|Embed + Search| VDB
+    RAG -->|SQL Query| DDB
     RAG -->|Query + Context| LLM
-    LLM -->|API Calls| LLM_API
     SP -.->|Injected| LLM
-    DU -->|Raw Files| FS
-    OBS -.->|Traces & Metrics| TEL
-
-    style Client fill:#e0f2fe,stroke:#0284c7,color:#000
-    style Server fill:#f0fdf4,stroke:#16a34a,color:#000
-    style Storage fill:#fef9c3,stroke:#ca8a04,color:#000
-    style External fill:#fae8ff,stroke:#a855f7,color:#000
+    API -->|Raw Files| FS
 ```
 
----
+### Key Design: Agentic Tool-Calling RAG
 
-## RAG Pipeline Flow
+Rather than a static retrieve-then-generate pipeline, the RAG engine uses an **agentic tool-calling loop**:
 
-```mermaid
-graph LR
-    subgraph Ingestion["📥 Ingestion"]
-        A[Upload Document] --> B[Parse & Chunk]
-        B --> C[Generate Embeddings]
-        C --> D[Store in Vector DB]
-    end
+1. The LLM receives the user query along with dynamically-bound tools based on what data is available.
+2. If vector documents are ingested, a `vector_search` tool is exposed. If CSV data is loaded, a `sql_query` tool is exposed.
+3. The LLM decides which tools to call (and in what order) to answer the query. This allows multi-step reasoning — e.g., first querying structured data for account info, then searching compliance docs for relevant rules.
+4. Tool results are fed back to the LLM, which may call more tools or produce a final answer.
+5. A safety cap of 10 iterations prevents runaway loops.
 
-    subgraph Retrieval["🔍 Retrieval"]
-        E[User Query] --> F[Query Embedding]
-        F --> G[Similarity Search]
-        G --> H[Top-K Chunks]
-    end
-
-    subgraph Generation["🤖 Generation"]
-        I[System Prompt — from memory] --> J[Build Prompt]
-        H --> J
-        J --> K{Streaming?}
-        K -->|Yes| L[Stream via SSE]
-        K -->|No| M[Full Response]
-    end
-
-    D -.->|Indexed| G
-
-    style Ingestion fill:#dbeafe,stroke:#2563eb,color:#000
-    style Retrieval fill:#dcfce7,stroke:#16a34a,color:#000
-    style Generation fill:#fef3c7,stroke:#d97706,color:#000
-```
+This approach handles complex cross-data queries that a simple hybrid search cannot.
 
 ---
 
-## Request Lifecycle
+## Setup Instructions
 
-```mermaid
-sequenceDiagram
-    participant U as Agent (User)
-    participant FE as Next.js Frontend
-    participant BE as FastAPI Backend
-    participant VDB as Vector DB
-    participant LLM as LLM Provider
+### Prerequisites
 
-    U->>FE: "What do I do if a consumer files bankruptcy?"
-    FE->>BE: POST /api/chat {query, model, stream}
-    BE->>BE: Load system prompt from memory
-    BE->>VDB: Similarity search (query embedding)
-    VDB-->>BE: Top-K relevant chunks
-    BE->>LLM: System prompt + context + query
+- Python 3.11+
+- Node.js 18+
+- An [OpenRouter](https://openrouter.ai/) API key
 
-    alt Streaming Mode
-        LLM-->>BE: Token stream
-        BE-->>FE: SSE / chunked response
-        FE-->>U: Tokens render incrementally
-    else Non-Streaming Mode
-        LLM-->>BE: Complete response
-        BE-->>FE: JSON response
-        FE-->>U: Full response rendered
-    end
-```
-
----
-
-## Tech Stack (Required)
-
-| Layer       | Technology                                      |
-| ----------- | ----------------------------------------------- |
-| Frontend    | **Next.js** (App Router preferred) or **React** |
-| Backend     | **Python FastAPI**                               |
-| Vector DB   | Any (e.g., ChromaDB, Qdrant, Weaviate, Pinecone, Milvus, pgvector) |
-| LLM         | Any provider (OpenAI, Anthropic, Mistral, Groq, Ollama, etc.)      |
-
----
-
-## Mandatory Features
-
-### 1. Chat Interface
-
-- A conversational UI where agents can send questions and receive AI-generated answers.
-- Display conversation history within the session.
-- Clearly distinguish between user messages and AI responses.
-- Handle loading/thinking states gracefully.
-
-### 2. RAG Pipeline
-
-Build a complete Retrieval-Augmented Generation pipeline:
-
-- **Ingestion** — Accept the provided reference documents (and any additional uploads), chunk them, generate embeddings, and store in the vector database.
-- **Retrieval** — On each query, perform similarity search and retrieve the most relevant chunks.
-- **Generation** — Pass the system prompt (from memory) + retrieved context + user query to the selected LLM.
-
-The system should behave meaningfully differently when documents have been ingested vs. when the vector store is empty. Make this distinction clear in the UI or response.
-
-### 3. System Prompt Management
-
-- The system prompt must be stored **in memory** on the backend (e.g., a Python variable, a singleton config object, or equivalent).
-- It should NOT be sent from the frontend on each request.
-- The backend injects the system prompt into every LLM call automatically.
-- **Bonus**: Expose a `PUT /api/config/system-prompt` endpoint to update the prompt at runtime without restarting the server.
-
-### 4. Model Selection
-
-- Provide a UI control that lets the user switch between **at least two LLM models**:
-  - One **"thinking" model** (e.g., o1, Claude 3.5 Sonnet, DeepSeek-R1, or any model with chain-of-thought / extended thinking capabilities).
-  - One **"non-thinking" / standard model** (e.g., GPT-4o-mini, Claude Haiku, Mistral Small, etc.).
-- The switch should take effect immediately on the next query.
-
-### 5. Streaming Toggle
-
-- Provide a UI control to switch between **streaming** and **non-streaming** response modes.
-- **Streaming**: Tokens appear incrementally (via SSE, WebSockets, or equivalent).
-- **Non-streaming**: Full response appears at once.
-- The toggle should take effect on the next query.
-
----
-
-## Mandatory Engineering Requirements
-
-### Linting
-
-- Linters configured for **both** frontend and backend.
-- Frontend: ESLint (e.g., `next/core-web-vitals`, `prettier`).
-- Backend: `ruff`, `flake8`, or `pylint`.
-- Lint commands in project scripts (`npm run lint`, `make lint`).
-- Codebase **must pass linting without errors** at submission.
-
-### Unit Tests
-
-- Meaningful tests for **both** frontend and backend.
-- Backend (`pytest`): RAG retrieval logic, API endpoint contracts, utility functions.
-- Frontend (Jest / Vitest / RTL): At least 1–2 key components or hooks.
-- Test commands in project scripts (`npm test`, `pytest`).
-
-### Documentation
-
-`README.md` at the root with:
-
-- **Project overview** — what it does.
-- **Architecture** — how the pieces fit together (diagram is a plus).
-- **Setup instructions** — step-by-step to run locally.
-- **API documentation** — all endpoints with request/response formats (Swagger counts).
-- **Design decisions** — why you chose your vector DB, LLM, chunking strategy, etc.
-- **Known limitations** — what's incomplete or you'd improve.
-
----
-
-## Clean Code Principles
-
-These are **mandatory**, not guidelines.
-
-### Code Organization
-
-- Logical project layout grouped by feature or layer.
-- Separation of concerns — route handlers should NOT contain business logic.
-- Single Responsibility — each function/class does one thing well.
-
-### Naming & Readability
-
-- Descriptive naming that reveals intent (`get_relevant_documents` not `get_docs`).
-- Consistent conventions (`snake_case` Python, `camelCase` JS/TS).
-- Comments explain **why**, not **what**.
-
-### Engineering Hygiene
-
-- No dead code, unused imports, or commented-out blocks.
-- No hardcoded values — use env vars and config files. Include `.env.example`.
-- DRY — extract shared logic.
-- Proper error handling — no bare `except:`, no swallowed errors.
-- Type hints on all Python function signatures. TypeScript on frontend is a plus.
-
-### Git Practices
-
-- Atomic commits with clear messages. We **will** review commit history.
-- Conventional commits preferred (e.g., `feat:`, `fix:`, `docs:`).
-- No secrets in history. `.env` in `.gitignore`.
-
----
-
-## Section-Wise Setup Expectations
-
-### Expected Project Structure
-
-```
-project-root/
-├── frontend/                # Next.js app
-│   ├── src/
-│   │   ├── app/             # Pages & routes
-│   │   ├── components/      # UI components
-│   │   ├── hooks/           # Custom hooks
-│   │   ├── lib/             # API client, utils
-│   │   └── types/           # TypeScript interfaces
-│   ├── __tests__/
-│   ├── .env.example
-│   └── package.json
-│
-├── backend/                 # FastAPI app
-│   ├── app/
-│   │   ├── api/             # Route handlers
-│   │   ├── core/            # Config, prompt store, dependencies
-│   │   ├── models/          # Pydantic schemas
-│   │   ├── services/        # RAG, LLM, vector store logic
-│   │   └── utils/           # Helpers
-│   ├── tests/
-│   ├── .env.example
-│   └── pyproject.toml
-│
-├── rag-reference-data/      # Seed documents for RAG
-│   ├── fdcpa_quick_reference.md
-│   ├── call_scripts.md
-│   ├── sample_accounts.csv
-│   └── glossary.md
-│
-├── .github/                 # CI/CD (bonus)
-├── docker-compose.yml       # (optional)
-├── AI_USAGE.md              # (if AI tools used)
-└── README.md
-```
-
-### 1. Environment Setup
-
-```bash
-git clone <repo-url> && cd <project-root>
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-# Fill in API keys and config
-```
-
-### 2. Backend
+### Backend
 
 ```bash
 cd backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
+# Edit .env and set OPENROUTER_API_KEY
 uvicorn app.main:app --reload --port 8000
-# Swagger: http://localhost:8000/docs
 ```
 
-### 3. Frontend
+Swagger docs: http://localhost:8000/docs
+
+### Frontend
 
 ```bash
 cd frontend
-npm install && npm run dev
-# App: http://localhost:3000
+npm install
+cp .env.example .env.local
+# Default NEXT_PUBLIC_API_URL=http://localhost:8000
+npm run dev
 ```
 
-### 4. Ingest Seed Data
+App: http://localhost:3000
+
+### Ingest Seed Data
+
+Upload the reference documents from `rag-reference-data/` through the Document Panel in the UI, or via the API:
 
 ```bash
-# Via script or API — ingest the rag-reference-data/ files
-python scripts/ingest.py          # or
-curl -X POST http://localhost:8000/api/ingest -F "file=@rag-reference-data/fdcpa_quick_reference.md"
+for f in rag-reference-data/*; do
+  curl -X POST http://localhost:8000/api/documents -F "file=@$f"
+done
 ```
 
-### 5. Linting & Tests
+### Linting & Tests
 
 ```bash
 # Backend
-cd backend && ruff check .
-pytest
+cd backend
+ruff check .       # or: make lint
+pytest             # or: make test
 
 # Frontend
-cd frontend && npm run lint
+cd frontend
+npm run lint
 npm test
 ```
 
 ---
 
-## AI Agent / AI Tool Disclosure
+## API Documentation
 
-> **Mandatory if you use AI assistance.**
+Interactive Swagger docs are available at `http://localhost:8000/docs` when the backend is running.
 
-If you used any AI agent or tool (GitHub Copilot, Claude Code, Cursor, Aider, ChatGPT, etc.), include an `AI_USAGE.md` file documenting:
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `POST` | `/api/chat` | Chat query (streaming via SSE or non-streaming JSON) |
+| `POST` | `/api/documents` | Upload document (`.md`, `.csv`, `.txt`) |
+| `GET` | `/api/documents` | List ingested documents |
+| `DELETE` | `/api/documents/{filename}` | Delete a document and its data |
+| `GET` | `/api/config/system-prompt` | Get current system prompt |
+| `PUT` | `/api/config/system-prompt` | Update system prompt at runtime |
+| `GET` | `/api/config/models` | List available LLM models |
+| `GET` | `/health` | Health check |
 
-| Field | What to include |
-|-------|----------------|
-| **Tools used** | Name and version of every AI tool. |
-| **Scope** | Which parts of the codebase were AI-generated or AI-assisted. Be specific. |
-| **Prompts & skills** | Key prompts or config files used. Save as `.md` files in `docs/ai/` and reference them. |
-| **Human review** | How you reviewed, tested, and validated AI output. |
-| **Understanding** | Be prepared to explain any AI-generated code in a follow-up discussion. |
+### Chat Request/Response
 
-> Using AI tools is perfectly acceptable. We care about **transparency** and **understanding**, not whether you used them.
+**Non-streaming** (`stream: false`):
+```json
+// Request
+{ "query": "What are the permitted calling hours?", "model": "anthropic/claude-sonnet-4-6", "stream": false, "history": [] }
 
----
-
-## Bonus Features
-
-Implement any that demonstrate your skills. Quality over quantity.
-
-### 1. Authentication & Authorization on RAG Layer
-
-- Protect RAG endpoints behind auth.
-- Scope documents per user (User A can't query User B's docs).
-
-### 2. Login / Logout
-
-- User auth (JWT, session, OAuth — your choice).
-- Appropriate UI states for logged-in vs. logged-out.
-
-### 3. Document Upload Interface
-
-- UI for uploading documents (drag-and-drop, file picker, or both).
-- Upload progress and confirmation.
-- Optionally list ingested documents with metadata.
-
-### 4. CI/CD Pipeline
-
-- GitHub Actions or similar running linting + tests.
-- Include the pipeline config in the repo.
-
-### 5. Hosted URL
-
-- Deploy to a public URL. Include it in the README.
-
-### 6. Observability Layer
-
-Instrument the backend with an observability stack:
-
-- **Tracing** — Trace the full lifecycle of a request: API → RAG retrieval → LLM call → response. Use OpenTelemetry, Langfuse, LangSmith, or any provider.
-- **Metrics** — Track at minimum: request latency, LLM token usage, retrieval hit/miss rates, error counts.
-- **Logging** — Structured logging (JSON format preferred) with correlation IDs tying logs to traces.
-
-The goal is to be able to answer: *"Why was this response slow?"* or *"Why did the model hallucinate here?"* from the telemetry data.
-
-> You do NOT need a production monitoring stack. A local Jaeger/Zipkin instance, a Langfuse self-hosted setup, or even console-exported traces with clear correlation IDs are sufficient.
-
----
-
-## Evaluation Criteria
-
-```mermaid
-graph LR
-    subgraph Core["🎯 Core — High Weight"]
-        F["Functionality"]
-        CQ["Code Quality"]
-        A["Architecture"]
-    end
-
-    subgraph Engineering["🔧 Engineering — Medium Weight"]
-        T["Testing"]
-        D["Documentation"]
-        CC["Clean Code"]
-        EH["Error Handling"]
-    end
-
-    subgraph Polish["✨ Polish — Lower Weight"]
-        UX["UI / UX"]
-        B["Bonus Features"]
-        AT["AI Transparency"]
-    end
-
-    style Core fill:#dbeafe,stroke:#2563eb,color:#000
-    style Engineering fill:#dcfce7,stroke:#16a34a,color:#000
-    style Polish fill:#fef3c7,stroke:#d97706,color:#000
+// Response
+{ "response": "According to the FDCPA...", "sources": ["fdcpa_quick_reference.md"], "model": "anthropic/claude-sonnet-4-6" }
 ```
 
-| Criteria                | What We Look For                                                                 | Weight |
-| ----------------------- | -------------------------------------------------------------------------------- | ------ |
-| **Functionality**       | All mandatory features work. RAG pipeline is functional end-to-end with the provided seed data. | High   |
-| **Code Quality**        | Clean, readable, well-organized. Follows the clean code principles above.         | High   |
-| **Architecture**        | Separation of concerns. Logical structure. Scalable patterns.                     | High   |
-| **Testing**             | Meaningful tests covering important logic — not just smoke tests.                 | Medium |
-| **Documentation**       | Another developer can clone and run with minimal friction.                         | Medium |
-| **Clean Code**          | Types, naming, DRY, git history, error handling.                                  | Medium |
-| **Error Handling**      | Graceful failures (LLM errors, empty store, bad uploads).                         | Medium |
-| **UI/UX**              | Intuitive, responsive, not broken. Doesn't need to be award-winning.              | Low    |
-| **Bonus Features**      | Quality over quantity. Well-implemented bonuses > half-finished everything.        | Low    |
-| **AI Transparency**     | Honest disclosure and demonstrated understanding if AI tools were used.            | —      |
+**Streaming** (`stream: true`): Returns `text/event-stream` (SSE) with events:
+```
+data: {"token": "partial text"}
+data: {"sources": ["fdcpa_quick_reference.md"]}
+data: {"done": true}
+```
+
+See [`docs/ai/api-spec.md`](docs/ai/api-spec.md) for full endpoint details.
 
 ---
 
-## Submission Guidelines
+## Design Decisions
 
-1. Push to a **public or private GitHub repository**.
-2. `README.md` with everything needed to run the project.
-3. `rag-reference-data/` folder with the provided seed documents included.
-4. `AI_USAGE.md` if AI tools were used (with supporting `.md` files in `docs/ai/`).
-5. If private repo, grant access to: `[ADD REVIEWER GITHUB HANDLES HERE]`.
-6. If hosted, verify the URL works before submitting.
-
-> **Note:** If your solution requires paid API keys, include a `.env.example` with placeholders. Do NOT commit secrets.
-
----
-
-## FAQ
-
-**Can I use additional libraries or frameworks?**
-Yes. Be prepared to explain your choices.
-
-**Can I use LangChain, LlamaIndex, or similar?**
-Yes, but demonstrate you understand what it's doing. Over-abstraction with no understanding is viewed less favorably.
-
-**Do I need to support multiple file types?**
-At minimum, handle the provided `.md` and `.csv` files. Supporting PDF or DOCX is a bonus.
-
-**What if I can't finish everything?**
-Focus on mandatory features first. Document what you'd do next in "Known Limitations."
-
-**Is using AI tools penalized?**
-No. Undisclosed AI usage that surfaces during review will reflect poorly. Transparency is what matters.
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| **Vector DB** | ChromaDB | Zero-config embedded DB with built-in embeddings. No external service needed. Persists to disk (`data/chroma/`). |
+| **Structured data** | DuckDB | Analytical SQL engine that handles CSV natively. Enables flexible queries (aggregations, filters) that vector search alone cannot answer well. |
+| **LLM provider** | OpenRouter | Single API key gives access to multiple model providers. Easy to swap between thinking (Claude Opus) and standard (Claude Sonnet) models. |
+| **RAG strategy** | Agentic tool-calling loop | More flexible than static retrieve-then-generate. The LLM dynamically chooses which data sources to query and can do multi-step reasoning across structured and unstructured data. |
+| **Chunking** | Markdown-aware splitting | Splits by `## ` headers first, then by paragraphs if sections exceed 1000 chars. Preserves document structure and section context in metadata. |
+| **Streaming** | SSE via `sse-starlette` | Simpler than WebSockets for unidirectional streaming. Native browser `EventSource` compatibility. |
+| **System prompt** | In-memory singleton | Updatable at runtime via API without restart. Not persisted to disk (resets on restart, which is acceptable for this use case). |
+| **Frontend state** | Custom React hooks | Lightweight, no external state library needed. `useChat`, `useDocuments`, `useModels` each own their domain. |
+| **Frontend framework** | Next.js 16 / React 19 | Latest App Router with React 19 features. Tailwind CSS v4 for styling. |
 
 ---
 
-Good luck. We're looking forward to seeing what you build.
+## Project Structure
+
+```
+project-root/
+├── backend/
+│   ├── app/
+│   │   ├── api/            # Route handlers (chat, documents, config)
+│   │   ├── core/           # Config (pydantic-settings), prompt store
+│   │   ├── models/         # Pydantic request/response schemas
+│   │   ├── services/       # RAG engine, vector store, structured store, LLM client
+│   │   └── utils/          # Markdown chunking
+│   ├── tests/              # pytest test suite (49 tests)
+│   ├── .env.example
+│   ├── pyproject.toml      # Ruff + pytest config
+│   ├── requirements.txt
+│   └── Makefile
+│
+├── frontend/
+│   ├── app/                # Next.js App Router (layout, page)
+│   ├── components/         # Chat, documents, model selector, stream toggle, etc.
+│   ├── hooks/              # useChat, useDocuments, useModels
+│   ├── lib/                # API client
+│   ├── types/              # TypeScript interfaces
+│   ├── __tests__/          # Vitest + React Testing Library
+│   ├── .env.example
+│   └── package.json
+│
+├── rag-reference-data/     # Seed documents for RAG pipeline
+│   ├── fdcpa_quick_reference.md
+│   ├── call_scripts.md
+│   ├── sample_accounts.csv
+│   └── glossary.md
+│
+├── docs/                   # Design docs and AI usage records
+│   ├── ai/
+│   └── ASSIGNMENT.md       # Original assignment specification
+│
+├── AI_USAGE.md
+└── README.md
+```
+
+---
+
+## Environment Variables
+
+### Backend (`backend/.env`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENROUTER_API_KEY` | *(required)* | OpenRouter API key |
+| `LLM_BASE_URL` | `https://openrouter.ai/api/v1` | LLM API base URL |
+| `THINKING_MODEL` | `anthropic/claude-opus-4-6` | Model ID for "thinking" mode |
+| `NON_THINKING_MODEL` | `anthropic/claude-sonnet-4-6` | Model ID for standard mode |
+| `DATA_DIR` | `./data` | Directory for persisted data |
+
+### Frontend (`frontend/.env.local`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Backend API URL |
+
+---
+
+## Known Limitations
+
+- **No authentication**: All endpoints are public. In production, RAG endpoints should be protected and documents scoped per user.
+- **CORS open**: Backend allows all origins (`*`). Should be restricted to the frontend domain in production.
+- **System prompt not persisted**: The in-memory prompt store resets on server restart.
+- **No CI/CD pipeline**: Linting and tests run locally but no GitHub Actions configured.
+- **Single vector collection**: All documents share one ChromaDB collection. Multi-tenant scenarios would need per-user collections.
+- **No PDF/DOCX support**: Only `.md`, `.csv`, and `.txt` files are supported for upload.
+- **ChromaDB default embeddings**: Uses ChromaDB's built-in embedding function. A production system might use a dedicated embedding model for better retrieval quality.
+- **No conversation persistence**: Chat history is in-memory on the frontend only and lost on page refresh.

@@ -13,12 +13,16 @@ SUPPORTED_EXTENSIONS = {".md", ".csv", ".txt"}
 
 
 @router.post("/api/documents", response_model=IngestResponse)
-async def upload_document(request: Request, file: UploadFile = File(...)):
+async def upload_document(
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
+) -> IngestResponse:
     ext = Path(file.filename).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
+        supported = sorted(SUPPORTED_EXTENSIONS)
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type: {ext}. Supported: {sorted(SUPPORTED_EXTENSIONS)}",
+            detail=f"Unsupported file type: {ext}. Supported: {supported}",
         )
 
     upload_dir = Path(settings.data_dir) / "uploads"
@@ -53,7 +57,7 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
 
 
 @router.get("/api/documents")
-async def list_documents(request: Request):
+async def list_documents(request: Request) -> dict[str, list[str]]:
     vector_store = request.app.state.vector_store
     structured_store = request.app.state.structured_store
 
@@ -62,13 +66,15 @@ async def list_documents(request: Request):
         all_meta = vector_store.collection.get()["metadatas"]
         unstructured = sorted({m.get("source", "unknown") for m in all_meta})
 
-    structured = list(structured_store.tables.keys()) if structured_store.has_data() else []
+    structured = (
+        list(structured_store.tables.keys()) if structured_store.has_data() else []
+    )
 
     return {"unstructured": unstructured, "structured": structured}
 
 
 @router.delete("/api/documents/{filename}")
-async def delete_document(filename: str, request: Request):
+async def delete_document(filename: str, request: Request) -> dict[str, str]:
     vector_store = request.app.state.vector_store
     structured_store = request.app.state.structured_store
     deleted = False
@@ -86,8 +92,6 @@ async def delete_document(filename: str, request: Request):
         upload_path.unlink()
 
     if not deleted:
-        raise HTTPException(
-            status_code=404, detail=f"Document '{filename}' not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Document '{filename}' not found")
 
     return {"detail": f"Document '{filename}' deleted"}

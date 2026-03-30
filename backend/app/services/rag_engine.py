@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from app.core.prompt_store import prompt_store
 from app.services.llm_client import LLMClient
@@ -22,68 +23,72 @@ class RAGEngine:
 
     # -- Dynamic tool binding --------------------------------------------------
 
-    def _get_tools(self) -> list[dict]:
+    def _get_tools(self) -> list[dict[str, Any]]:
         """Build tool definitions based on currently available data."""
-        tools: list[dict] = []
+        tools: list[dict[str, Any]] = []
 
         if self.vector_store.has_documents():
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": "vector_search",
-                    "description": (
-                        "Search through ingested unstructured documents "
-                        "(markdown files, text) for relevant information. "
-                        + self.vector_store.get_document_summary()
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": (
-                                    "Natural language search query to find "
-                                    "relevant document chunks"
-                                ),
-                            }
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "vector_search",
+                        "description": (
+                            "Search through ingested unstructured documents "
+                            "(markdown files, text) for relevant information. "
+                            + self.vector_store.get_document_summary()
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": (
+                                        "Natural language search query to find "
+                                        "relevant document chunks"
+                                    ),
+                                }
+                            },
+                            "required": ["query"],
                         },
-                        "required": ["query"],
                     },
-                },
-            })
+                }
+            )
 
         if self.structured_store.has_data():
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": "sql_query",
-                    "description": (
-                        "Query structured data using SQL. "
-                        "Available data:\n"
-                        + self.structured_store.get_schema_summary()
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": (
-                                    "SQL query to execute against the structured "
-                                    "data using DuckDB SQL syntax"
-                                ),
-                            }
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "sql_query",
+                        "description": (
+                            "Query structured data using SQL. "
+                            "Available data:\n"
+                            + self.structured_store.get_schema_summary()
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": (
+                                        "SQL query to execute against the structured "
+                                        "data using DuckDB SQL syntax"
+                                    ),
+                                }
+                            },
+                            "required": ["query"],
                         },
-                        "required": ["query"],
                     },
-                },
-            })
+                }
+            )
 
         return tools
 
     # -- Tool execution --------------------------------------------------------
 
     async def _execute_tool(
-        self, name: str, arguments: dict
+        self, name: str, arguments: dict[str, Any]
     ) -> tuple[str, set[str]]:
         """Execute a tool and return (result_text, source_names)."""
         if name == "vector_search":
@@ -102,15 +107,21 @@ class RAGEngine:
 
         if name == "sql_query":
             result = self.structured_store.execute_query(arguments["query"])
-            return result, {"structured_data"}
+            query_upper = arguments["query"].upper()
+            sources = {
+                table_name
+                for table_name in self.structured_store.tables
+                if table_name.upper() in query_upper
+            } or {"structured_data"}
+            return result, sources
 
         return f"Unknown tool: {name}", set()
 
     # -- Message building ------------------------------------------------------
 
     def _build_messages(
-        self, query: str, history: list[dict]
-    ) -> list[dict]:
+        self, query: str, history: list[dict[str, str]]
+    ) -> list[dict[str, Any]]:
         system_content = prompt_store.get_prompt()
         tools = self._get_tools()
 
@@ -122,7 +133,7 @@ class RAGEngine:
                 "questions about compliance, accounts, or scripts."
             )
 
-        messages = [{"role": "system", "content": system_content}]
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
         for msg in history:
             messages.append({"role": msg["role"], "content": msg["content"]})
         messages.append({"role": "user", "content": query})
@@ -134,17 +145,15 @@ class RAGEngine:
         self,
         query: str,
         model: str,
-        history: list[dict] | None = None,
-    ) -> dict:
+        history: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
         """Run the full tool-calling loop and return the final response."""
         messages = self._build_messages(query, history or [])
         tools = self._get_tools()
         sources: set[str] = set()
 
         for _ in range(MAX_TOOL_ITERATIONS):
-            response = await self.llm.chat(
-                messages, model, tools=tools or None
-            )
+            response = await self.llm.chat(messages, model, tools=tools or None)
             msg = response.choices[0].message
 
             if not msg.tool_calls:
@@ -162,23 +171,25 @@ class RAGEngine:
                 }
                 for tc in msg.tool_calls
             ]
-            messages.append({
-                "role": "assistant",
-                "content": msg.content,
-                "tool_calls": tool_calls_list,
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": msg.content,
+                    "tool_calls": tool_calls_list,
+                }
+            )
 
             for tc in msg.tool_calls:
                 args = json.loads(tc.function.arguments)
-                result, tool_sources = await self._execute_tool(
-                    tc.function.name, args
-                )
+                result, tool_sources = await self._execute_tool(tc.function.name, args)
                 sources.update(tool_sources)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    }
+                )
 
         return {
             "content": (
@@ -194,16 +205,19 @@ class RAGEngine:
         self,
         query: str,
         model: str,
-        history: list[dict] | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> AsyncGenerator[str, None]:
-        """Stream the final answer. Tool-calling rounds are handled inline."""
+        """Stream the final answer. Tool-calling rounds are handled inline.
+
+        Yields plain text tokens during the final LLM response, then a JSON
+        ``{"sources": [...]}`` event so callers can display citations.
+        """
         messages = self._build_messages(query, history or [])
         tools = self._get_tools()
+        sources: set[str] = set()
 
         for _ in range(MAX_TOOL_ITERATIONS):
-            stream = await self.llm.chat_stream(
-                messages, model, tools=tools or None
-            )
+            stream = await self.llm.chat_stream(messages, model, tools=tools or None)
 
             collected_tool_calls: dict[int, dict] = {}
             has_tool_calls = False
@@ -239,6 +253,8 @@ class RAGEngine:
                     yield delta.content
 
             if not has_tool_calls:
+                if sources:
+                    yield json.dumps({"sources": sorted(sources)})
                 return  # Final answer was streamed above
 
             # Build assistant message with collected tool calls
@@ -253,22 +269,24 @@ class RAGEngine:
                 }
                 for tc in collected_tool_calls.values()
             ]
-            messages.append({
-                "role": "assistant",
-                "content": None,
-                "tool_calls": tool_calls_list,
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": tool_calls_list,
+                }
+            )
 
             for tc_data in collected_tool_calls.values():
                 args = json.loads(tc_data["arguments"])
-                result, _ = await self._execute_tool(tc_data["name"], args)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc_data["id"],
-                    "content": result,
-                })
+                result, tool_sources = await self._execute_tool(tc_data["name"], args)
+                sources.update(tool_sources)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc_data["id"],
+                        "content": result,
+                    }
+                )
 
-        yield (
-            "I was unable to fully process your request. "
-            "Please try rephrasing."
-        )
+        yield ("I was unable to fully process your request. Please try rephrasing.")

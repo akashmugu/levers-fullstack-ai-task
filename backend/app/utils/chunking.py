@@ -2,9 +2,7 @@ import re
 import uuid
 
 
-def chunk_markdown(
-    text: str, source: str, max_chunk_size: int = 1000
-) -> list[dict]:
+def chunk_markdown(text: str, source: str, max_chunk_size: int = 1000) -> list[dict]:
     """Split markdown by headers, then by paragraphs if chunks are too large."""
     chunks: list[dict] = []
     sections = re.split(r"\n(?=## )", text)

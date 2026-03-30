@@ -47,7 +47,7 @@ export function ChatInput({ onSend, onStop, isLoading, disabled }: ChatInputProp
         placeholder="Ask about compliance, accounts, scripts..."
         rows={1}
         disabled={disabled}
-        className="flex-1 resize-none rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-blue-400"
+        className="flex-1 resize-none overflow-hidden rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-blue-400"
       />
       {isLoading ? (
         <button

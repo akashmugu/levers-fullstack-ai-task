@@ -32,12 +32,16 @@ class VectorStore:
 
         output = []
         for i in range(len(results["ids"][0])):
-            output.append({
-                "id": results["ids"][0][i],
-                "text": results["documents"][0][i],
-                "metadata": results["metadatas"][0][i],
-                "distance": results["distances"][0][i] if results.get("distances") else None,
-            })
+            output.append(
+                {
+                    "id": results["ids"][0][i],
+                    "text": results["documents"][0][i],
+                    "metadata": results["metadatas"][0][i],
+                    "distance": (
+                        results["distances"][0][i] if results.get("distances") else None
+                    ),
+                }
+            )
         return output
 
     def has_documents(self) -> bool:
