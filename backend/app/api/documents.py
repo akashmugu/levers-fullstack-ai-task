@@ -5,7 +5,6 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from app.core.config import settings
 from app.models.schemas import IngestResponse
-from app.services.structured_store import _sanitize_table_name
 from app.utils.chunking import chunk_markdown
 
 router = APIRouter()
@@ -35,11 +34,11 @@ async def upload_document(
 
     if ext == ".csv":
         store = request.app.state.structured_store
-        safe_name = store.ingest_csv(str(file_path), file.filename)
+        store.ingest_csv(str(file_path), file.filename)
         return IngestResponse(
             filename=file.filename,
             doc_type="structured",
-            detail=f"Loaded as table '{safe_name}'",
+            detail=f"Loaded as table '{file.filename}'",
         )
 
     content = file_path.read_text()
@@ -84,9 +83,8 @@ async def delete_document(filename: str, request: Request) -> dict[str, str]:
         vector_store.delete_document(filename)
         deleted = True
 
-    safe_name = _sanitize_table_name(filename)
-    if structured_store.table_exists(safe_name):
-        structured_store.drop_table(safe_name)
+    if structured_store.table_exists(filename):
+        structured_store.drop_table(filename)
         deleted = True
 
     upload_path = Path(settings.data_dir) / "uploads" / filename
