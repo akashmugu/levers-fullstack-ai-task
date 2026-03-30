@@ -14,7 +14,7 @@ interface EmptyStateProps {
 
 export function EmptyState({ onSuggestion, hasDocuments }: EmptyStateProps) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4">
+    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-2">
       <div className="text-center">
         <h2 className="text-xl font-semibold text-zinc-800 dark:text-zinc-200">
           Debt Collection Compliance Assistant
