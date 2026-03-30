@@ -39,7 +39,7 @@ class TestChatEndpoint:
         events = []
         for line in response.iter_lines():
             if line.startswith("data:"):
-                events.append(json.loads(line[len("data:"):].strip()))
+                events.append(json.loads(line[len("data:") :].strip()))
 
         tokens = [e["token"] for e in events if "token" in e]
         assert "".join(tokens) == "Hello world"
@@ -100,9 +100,7 @@ class TestConfigEndpoints:
 
 
 class TestDocumentsEndpoint:
-    def test_upload_unsupported_file_type(
-        self, test_client: TestClient
-    ) -> None:
+    def test_upload_unsupported_file_type(self, test_client: TestClient) -> None:
         response = test_client.post(
             "/api/documents",
             files={"file": ("bad.exe", b"content", "application/octet-stream")},
@@ -110,8 +108,42 @@ class TestDocumentsEndpoint:
         assert response.status_code == 400
         assert "Unsupported file type" in response.json()["detail"]
 
-    def test_delete_nonexistent_document(
-        self, test_client: TestClient
-    ) -> None:
+    def test_delete_nonexistent_document(self, test_client: TestClient) -> None:
         response = test_client.delete("/api/documents/nonexistent.md")
         assert response.status_code == 404
+
+    def test_upload_markdown(self, test_client_with_stores: TestClient) -> None:
+        md_content = b"## Test Section\nSome compliance content here."
+        response = test_client_with_stores.post(
+            "/api/documents",
+            files={"file": ("test.md", md_content, "text/markdown")},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["filename"] == "test.md"
+        assert data["doc_type"] == "unstructured"
+        assert "chunks" in data["detail"]
+
+    def test_upload_csv(self, test_client_with_stores: TestClient) -> None:
+        csv_content = b"account_id,name,status\nACC-001,John,active\n"
+        response = test_client_with_stores.post(
+            "/api/documents",
+            files={"file": ("accounts.csv", csv_content, "text/csv")},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["filename"] == "accounts.csv"
+        assert data["doc_type"] == "structured"
+
+    def test_list_documents(self, test_client_with_stores: TestClient) -> None:
+        # Upload a markdown file first
+        test_client_with_stores.post(
+            "/api/documents",
+            files={"file": ("doc.md", b"## Title\nContent", "text/markdown")},
+        )
+        response = test_client_with_stores.get("/api/documents")
+        assert response.status_code == 200
+        data = response.json()
+        assert "unstructured" in data
+        assert "structured" in data
+        assert "doc.md" in data["unstructured"]

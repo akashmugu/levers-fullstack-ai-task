@@ -5,6 +5,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from app.core.config import settings
 from app.models.schemas import IngestResponse
+from app.services.structured_store import _sanitize_table_name
 from app.utils.chunking import chunk_markdown
 
 router = APIRouter()
@@ -14,7 +15,8 @@ SUPPORTED_EXTENSIONS = {".md", ".csv", ".txt"}
 
 @router.post("/api/documents", response_model=IngestResponse)
 async def upload_document(
-    request: Request, file: UploadFile = File(...)  # noqa: B008
+    request: Request,
+    file: UploadFile = File(...),  # noqa: B008
 ) -> IngestResponse:
     ext = Path(file.filename).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
@@ -33,11 +35,11 @@ async def upload_document(
 
     if ext == ".csv":
         store = request.app.state.structured_store
-        store.ingest_csv(str(file_path), file.filename)
+        safe_name = store.ingest_csv(str(file_path), file.filename)
         return IngestResponse(
             filename=file.filename,
             doc_type="structured",
-            detail=f"Loaded as table '{file.filename}'",
+            detail=f"Loaded as table '{safe_name}'",
         )
 
     content = file_path.read_text()
@@ -66,9 +68,7 @@ async def list_documents(request: Request) -> dict[str, list[str]]:
         unstructured = sorted({m.get("source", "unknown") for m in all_meta})
 
     structured = (
-        list(structured_store.tables.keys())
-        if structured_store.has_data()
-        else []
+        list(structured_store.tables.keys()) if structured_store.has_data() else []
     )
 
     return {"unstructured": unstructured, "structured": structured}
@@ -84,8 +84,9 @@ async def delete_document(filename: str, request: Request) -> dict[str, str]:
         vector_store.delete_document(filename)
         deleted = True
 
-    if structured_store.table_exists(filename):
-        structured_store.drop_table(filename)
+    safe_name = _sanitize_table_name(filename)
+    if structured_store.table_exists(safe_name):
+        structured_store.drop_table(safe_name)
         deleted = True
 
     upload_path = Path(settings.data_dir) / "uploads" / filename
@@ -93,8 +94,6 @@ async def delete_document(filename: str, request: Request) -> dict[str, str]:
         upload_path.unlink()
 
     if not deleted:
-        raise HTTPException(
-            status_code=404, detail=f"Document '{filename}' not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Document '{filename}' not found")
 
     return {"detail": f"Document '{filename}' deleted"}

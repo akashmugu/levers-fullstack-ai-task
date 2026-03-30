@@ -36,13 +36,15 @@ class TestVectorStore:
         assert results[0]["metadata"]["source"] == "fdcpa.md"
 
     def test_delete_document(self, store: VectorStore) -> None:
-        store.add_chunks([
-            {
-                "id": "1",
-                "text": "Some content",
-                "metadata": {"source": "to_delete.md", "section": ""},
-            },
-        ])
+        store.add_chunks(
+            [
+                {
+                    "id": "1",
+                    "text": "Some content",
+                    "metadata": {"source": "to_delete.md", "section": ""},
+                },
+            ]
+        )
         assert store.document_exists("to_delete.md") is True
         store.delete_document("to_delete.md")
         assert store.document_exists("to_delete.md") is False
@@ -52,18 +54,20 @@ class TestVectorStore:
         assert results == []
 
     def test_get_document_summary(self, store: VectorStore) -> None:
-        store.add_chunks([
-            {
-                "id": "1",
-                "text": "content",
-                "metadata": {"source": "doc_a.md", "section": ""},
-            },
-            {
-                "id": "2",
-                "text": "content",
-                "metadata": {"source": "doc_b.md", "section": ""},
-            },
-        ])
+        store.add_chunks(
+            [
+                {
+                    "id": "1",
+                    "text": "content",
+                    "metadata": {"source": "doc_a.md", "section": ""},
+                },
+                {
+                    "id": "2",
+                    "text": "content",
+                    "metadata": {"source": "doc_b.md", "section": ""},
+                },
+            ]
+        )
         summary = store.get_document_summary()
         assert "doc_a.md" in summary
         assert "doc_b.md" in summary
@@ -87,9 +91,7 @@ class TestStructuredStore:
     def test_empty_store(self, store: StructuredStore) -> None:
         assert store.has_data() is False
 
-    def test_ingest_and_query(
-        self, store: StructuredStore, sample_csv: Path
-    ) -> None:
+    def test_ingest_and_query(self, store: StructuredStore, sample_csv: Path) -> None:
         store.ingest_csv(str(sample_csv), "accounts")
         assert store.has_data() is True
         assert store.table_exists("accounts") is True
@@ -99,17 +101,13 @@ class TestStructuredStore:
         )
         assert "John Doe" in result
 
-    def test_schema_summary(
-        self, store: StructuredStore, sample_csv: Path
-    ) -> None:
+    def test_schema_summary(self, store: StructuredStore, sample_csv: Path) -> None:
         store.ingest_csv(str(sample_csv), "accounts")
         summary = store.get_schema_summary()
         assert "accounts" in summary
         assert "2 rows" in summary
 
-    def test_drop_table(
-        self, store: StructuredStore, sample_csv: Path
-    ) -> None:
+    def test_drop_table(self, store: StructuredStore, sample_csv: Path) -> None:
         store.ingest_csv(str(sample_csv), "accounts")
         store.drop_table("accounts")
         assert store.table_exists("accounts") is False

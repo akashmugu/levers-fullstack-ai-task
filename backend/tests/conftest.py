@@ -46,3 +46,18 @@ def test_client(mock_rag_engine: AsyncMock) -> TestClient:
 
     app.state.rag_engine = mock_rag_engine
     return TestClient(app)
+
+
+@pytest.fixture()
+def test_client_with_stores(
+    tmp_data_dir: Path, mock_rag_engine: AsyncMock
+) -> TestClient:
+    """Test client with real vector/structured stores for document tests."""
+    from app.main import app
+    from app.services.structured_store import StructuredStore
+    from app.services.vector_store import VectorStore
+
+    app.state.rag_engine = mock_rag_engine
+    app.state.vector_store = VectorStore()
+    app.state.structured_store = StructuredStore()
+    return TestClient(app)

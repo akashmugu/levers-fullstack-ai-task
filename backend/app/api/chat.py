@@ -12,9 +12,7 @@ router = APIRouter()
 @router.post("/api/chat")
 async def chat(chat_request: ChatRequest, request: Request) -> Response:
     engine = request.app.state.rag_engine
-    history = [
-        {"role": m.role, "content": m.content} for m in chat_request.history
-    ]
+    history = [{"role": m.role, "content": m.content} for m in chat_request.history]
 
     if chat_request.stream:
 
@@ -23,6 +21,10 @@ async def chat(chat_request: ChatRequest, request: Request) -> Response:
                 async for token in engine.chat_stream(
                     chat_request.query, chat_request.model, history
                 ):
+                    # Detect the sources JSON emitted at end of stream
+                    if token.startswith('{"sources":'):
+                        yield {"data": token}
+                        continue
                     yield {"data": json.dumps({"token": token})}
                 yield {"data": json.dumps({"done": True})}
             except Exception as exc:
@@ -31,9 +33,7 @@ async def chat(chat_request: ChatRequest, request: Request) -> Response:
         return EventSourceResponse(event_generator())
 
     try:
-        result = await engine.chat(
-            chat_request.query, chat_request.model, history
-        )
+        result = await engine.chat(chat_request.query, chat_request.model, history)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

@@ -1,7 +1,7 @@
 from typing import Any
 
-from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletion
+from openai import AsyncOpenAI, AsyncStream
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from app.core.config import settings
 
@@ -30,7 +30,7 @@ class LLMClient:
         messages: list[dict[str, Any]],
         model: str,
         tools: list[dict[str, Any]] | None = None,
-    ) -> Any:
+    ) -> AsyncStream[ChatCompletionChunk]:
         """Streaming chat completion. Returns an AsyncStream."""
         kwargs: dict[str, Any] = {
             "model": model,
