@@ -102,7 +102,13 @@ class RAGEngine:
 
         if name == "sql_query":
             result = self.structured_store.execute_query(arguments["query"])
-            return result, {"structured_data"}
+            query_upper = arguments["query"].upper()
+            sources = {
+                table_name
+                for table_name in self.structured_store.tables
+                if table_name.upper() in query_upper
+            } or {"structured_data"}
+            return result, sources
 
         return f"Unknown tool: {name}", set()
 
