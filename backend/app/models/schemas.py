@@ -10,7 +10,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     query: str
-    model: str = "openai/gpt-4o-mini"
+    model: str = "anthropic/claude-sonnet-4-6"
     stream: bool = False
     history: list[ChatMessage] = []
 

@@ -12,8 +12,8 @@ router = APIRouter()
 SUPPORTED_EXTENSIONS = {".md", ".csv", ".txt"}
 
 
-@router.post("/api/ingest", response_model=IngestResponse)
-async def ingest_document(request: Request, file: UploadFile = File(...)):
+@router.post("/api/documents", response_model=IngestResponse)
+async def upload_document(request: Request, file: UploadFile = File(...)):
     ext = Path(file.filename).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
@@ -29,13 +29,12 @@ async def ingest_document(request: Request, file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, f)
 
     if ext == ".csv":
-        table_name = Path(file.filename).stem
         store = request.app.state.structured_store
-        safe_name = store.ingest_csv(str(file_path), table_name)
+        store.ingest_csv(str(file_path), file.filename)
         return IngestResponse(
             filename=file.filename,
             doc_type="structured",
-            detail=f"Loaded into table '{safe_name}'",
+            detail=f"Loaded as table '{file.filename}'",
         )
 
     content = file_path.read_text()
@@ -66,3 +65,29 @@ async def list_documents(request: Request):
     structured = list(structured_store.tables.keys()) if structured_store.has_data() else []
 
     return {"unstructured": unstructured, "structured": structured}
+
+
+@router.delete("/api/documents/{filename}")
+async def delete_document(filename: str, request: Request):
+    vector_store = request.app.state.vector_store
+    structured_store = request.app.state.structured_store
+    deleted = False
+
+    if vector_store.document_exists(filename):
+        vector_store.delete_document(filename)
+        deleted = True
+
+    if structured_store.table_exists(filename):
+        structured_store.drop_table(filename)
+        deleted = True
+
+    upload_path = Path(settings.data_dir) / "uploads" / filename
+    if upload_path.exists():
+        upload_path.unlink()
+
+    if not deleted:
+        raise HTTPException(
+            status_code=404, detail=f"Document '{filename}' not found"
+        )
+
+    return {"detail": f"Document '{filename}' deleted"}

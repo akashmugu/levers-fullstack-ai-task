@@ -58,7 +58,7 @@ class RAGEngine:
                 "function": {
                     "name": "sql_query",
                     "description": (
-                        "Query structured data (CSV files) using SQL. "
+                        "Query structured data using SQL. "
                         "Available data:\n"
                         + self.structured_store.get_schema_summary()
                     ),

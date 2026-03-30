@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chat, config, ingest
+from app.api import chat, config, documents
 from app.services.llm_client import LLMClient
 from app.services.rag_engine import RAGEngine
 from app.services.structured_store import StructuredStore
@@ -27,7 +27,7 @@ app.state.vector_store = vector_store
 app.state.structured_store = structured_store
 
 app.include_router(chat.router)
-app.include_router(ingest.router)
+app.include_router(documents.router)
 app.include_router(config.router)
 
 

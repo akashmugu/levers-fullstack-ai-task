@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 
 import duckdb
@@ -12,12 +11,6 @@ class StructuredStore:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = duckdb.connect(str(db_path))
         self.tables: dict[str, dict] = {}
-        self._load_existing_tables()
-
-    def _load_existing_tables(self) -> None:
-        rows = self.conn.execute("SHOW TABLES").fetchall()
-        for (table_name,) in rows:
-            self._cache_table_metadata(table_name)
 
     def _cache_table_metadata(self, table_name: str) -> None:
         schema = self.conn.execute(f'DESCRIBE "{table_name}"').fetchall()
@@ -33,17 +26,16 @@ class StructuredStore:
             "row_count": row_count,
         }
 
-    def _sanitize_table_name(self, name: str) -> str:
-        return re.sub(r"[^a-zA-Z0-9_]", "_", name)
-
-    def ingest_csv(self, file_path: str, table_name: str) -> str:
-        safe_name = self._sanitize_table_name(table_name)
+    def ingest_csv(self, file_path: str, table_name: str) -> None:
         self.conn.execute(
-            f"CREATE OR REPLACE TABLE \"{safe_name}\" "
+            f'CREATE OR REPLACE TABLE "{table_name}" '
             f"AS SELECT * FROM read_csv_auto('{file_path}')"
         )
-        self._cache_table_metadata(safe_name)
-        return safe_name
+        self._cache_table_metadata(table_name)
+
+    def drop_table(self, table_name: str) -> None:
+        self.conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+        self.tables.pop(table_name, None)
 
     def execute_query(self, query: str) -> str:
         try:
@@ -69,7 +61,7 @@ class StructuredStore:
         for table_name, info in self.tables.items():
             cols = ", ".join(f"{col[0]} ({col[1]})" for col in info["schema"])
             parts.append(
-                f"Table '{table_name}' ({info['row_count']} rows): columns [{cols}]"
+                f'Table "{table_name}" ({info["row_count"]} rows): columns [{cols}]'
             )
             if info["sample_rows"]:
                 sample_header = " | ".join(info["sample_columns"])
@@ -79,4 +71,4 @@ class StructuredStore:
         return "\n".join(parts)
 
     def table_exists(self, table_name: str) -> bool:
-        return self._sanitize_table_name(table_name) in self.tables
+        return table_name in self.tables
