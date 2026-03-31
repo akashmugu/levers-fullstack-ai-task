@@ -2,9 +2,9 @@
 
 const SUGGESTIONS = [
   "What are the permitted calling hours?",
-  "What script do I use for voicemail?",
+  "How many consumers do we have?",
   "What is the status of account ACC-007?",
-  "What does CEASE_DESIST mean?",
+  "Show me patterns of high-value consumers",
 ];
 
 interface EmptyStateProps {
